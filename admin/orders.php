@@ -1,9 +1,9 @@
 <?php
 /**
- * Admin Order & Payment Slip Verification CMS
+ * Admin Order & Payment Slip Verification CMS (100% Firebase Firestore)
  * 
- * Reviews uploaded slips, updates order lifecycle statuses,
- * records postal tracking numbers, and restocks cancelled items.
+ * Reviews uploaded slips, updates order lifecycle statuses, records tracking numbers,
+ * and restocks amulets in Firestore when cancelled.
  * 
  * @package AmuletPlatform
  */
@@ -13,82 +13,66 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/admin_guard.php';
 $admin_user = require_admin();
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
-$pdo = get_db_connection();
+$fs = get_firestore();
 $msg = '';
 
-// Handle Status & Tracking Number Updates
+// Handle Status & Tracking Number Updates via POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $order_id = (int)($_POST['order_id'] ?? 0);
+    $order_id = trim((string)($_POST['order_id'] ?? ''));
     $new_status = $_POST['status'] ?? '';
     $tracking_number = trim($_POST['tracking_number'] ?? '');
 
     $valid_statuses = ['pending_verification', 'preparing', 'shipped', 'cancelled'];
 
-    if ($order_id > 0 && in_array($new_status, $valid_statuses, true)) {
+    if (!empty($order_id) && in_array($new_status, $valid_statuses, true)) {
         try {
-            $pdo->beginTransaction();
+            $order = $fs->getDocument('orders', $order_id);
 
-            // Fetch current order status to handle inventory restocking if cancelled
-            $cur_stmt = $pdo->prepare("SELECT status FROM orders WHERE id = :id FOR UPDATE");
-            $cur_stmt->execute(['id' => $order_id]);
-            $current_order = $cur_stmt->fetch();
+            if ($order) {
+                $old_status = $order['status'] ?? 'pending_verification';
 
-            if ($current_order) {
-                // If transitioning to cancelled, restock amulets (is_available = 1)
-                if ($new_status === 'cancelled' && $current_order['status'] !== 'cancelled') {
-                    $item_stmt = $pdo->prepare("SELECT amulet_id FROM order_items WHERE order_id = :id");
-                    $item_stmt->execute(['id' => $order_id]);
-                    $items = $item_stmt->fetchAll();
-
-                    $restock_stmt = $pdo->prepare("UPDATE amulets SET is_available = 1 WHERE id = :amulet_id");
-                    foreach ($items as $it) {
-                        $restock_stmt->execute(['amulet_id' => $it['amulet_id']]);
+                // If moving to cancelled, restock amulets (is_available = true)
+                if ($new_status === 'cancelled' && $old_status !== 'cancelled') {
+                    foreach ($order['items'] ?? [] as $it) {
+                        $amId = (string)($it['amulet_id'] ?? '');
+                        if (!empty($amId)) {
+                            $fs->updateDocument('amulets', $amId, ['is_available' => true]);
+                        }
                     }
                 }
 
-                // If moving out of cancelled back to active, re-mark as unavailable (is_available = 0)
-                if ($current_order['status'] === 'cancelled' && $new_status !== 'cancelled') {
-                    $item_stmt = $pdo->prepare("SELECT amulet_id FROM order_items WHERE order_id = :id");
-                    $item_stmt->execute(['id' => $order_id]);
-                    $items = $item_stmt->fetchAll();
-
-                    $reserve_stmt = $pdo->prepare("UPDATE amulets SET is_available = 0 WHERE id = :amulet_id");
-                    foreach ($items as $it) {
-                        $reserve_stmt->execute(['amulet_id' => $it['amulet_id']]);
+                // If reactivating from cancelled, mark as unavailable
+                if ($old_status === 'cancelled' && $new_status !== 'cancelled') {
+                    foreach ($order['items'] ?? [] as $it) {
+                        $amId = (string)($it['amulet_id'] ?? '');
+                        if (!empty($amId)) {
+                            $fs->updateDocument('amulets', $amId, ['is_available' => false]);
+                        }
                     }
                 }
 
-                $update = $pdo->prepare("UPDATE orders SET status = :status, tracking_number = :tracking WHERE id = :id");
-                $update->execute([
+                $fs->updateDocument('orders', $order_id, [
                     'status' => $new_status,
-                    'tracking' => $tracking_number ?: null,
-                    'id' => $order_id,
+                    'tracking_number' => $tracking_number,
                 ]);
 
-                $pdo->commit();
                 $msg = "อัปเดตคำสั่งซื้อ #{$order_id} เป็นสถานะ '" . htmlspecialchars($new_status) . "' เรียบร้อยแล้ว";
-            } else {
-                $pdo->rollBack();
             }
-        } catch (PDOException $e) {
-            $pdo->rollBack();
-            error_log('[ADMIN ORDER ERROR] ' . $e->getMessage());
+        } catch (Exception $e) {
+            error_log('[ADMIN ORDER FIRESTORE ERROR] ' . $e->getMessage());
         }
     }
 }
 
-// Fetch all orders with user information
-$orders = $pdo->query("SELECT o.*, u.username, u.full_name, u.phone AS user_phone,
-                              GROUP_CONCAT(a.title SEPARATOR '||') AS amulet_titles,
-                              GROUP_CONCAT(a.price SEPARATOR '||') AS amulet_prices
-                       FROM orders o
-                       JOIN users u ON o.user_id = u.id
-                       JOIN order_items oi ON o.id = oi.order_id
-                       JOIN amulets a ON oi.amulet_id = a.id
-                       GROUP BY o.id
-                       ORDER BY o.id DESC")->fetchAll();
+// Fetch all orders from Firestore
+$orders = $fs->listDocuments('orders');
+
+// Sort newest first
+usort($orders, function($a, $b) {
+    return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
+});
 
 $page_title = 'ระบบตรวจสอบสลิปและจัดการคำสั่งซื้อ';
 ?>
@@ -125,6 +109,7 @@ $page_title = 'ระบบตรวจสอบสลิปและจัด�
                     <li><a href="amulets.php" class="nav-link">จัดการพระเครื่อง</a></li>
                     <li><a href="categories.php" class="nav-link">หมวดหมู่</a></li>
                     <li><a href="orders.php" class="nav-link active">ตรวจสอบสลิป</a></li>
+                    <li><a href="auctions.php" class="nav-link">จัดการประมูล</a></li>
                     <li><a href="../logout.php" class="btn btn-outline-gold">ออกจากระบบ</a></li>
                 </ul>
             </nav>
@@ -135,7 +120,7 @@ $page_title = 'ระบบตรวจสอบสลิปและจัด�
         <div class="container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                 <div>
-                    <h1>ตรวจสอบสลิปและสถานะการจัดส่ง</h1>
+                    <h1>ตรวจสอบสลิปและสถานะการจัดส่ง (Cloud Firestore)</h1>
                     <p class="text-light">พบทั้งหมด <?= count($orders) ?> รายการคำสั่งซื้อ</p>
                 </div>
             </div>
@@ -160,23 +145,20 @@ $page_title = 'ระบบตรวจสอบสลิปและจัด�
                                     <div style="font-size: 1.15rem; font-weight: 700; color: var(--gold-accent); margin-bottom: 0.25rem;">
                                         คำสั่งซื้อ #<?= str_pad((string)$ord['id'], 6, '0', STR_PAD_LEFT) ?>
                                         <span style="font-size: 0.85rem; font-weight: normal; color: var(--text-light); opacity: 0.8; margin-left: 0.5rem;">
-                                            (<?= date('d/m/Y H:i', strtotime($ord['created_at'])) ?>)
+                                            (<?= htmlspecialchars($ord['created_at'] ?? '', ENT_QUOTES, 'UTF-8') ?>)
                                         </span>
                                     </div>
                                     <div style="font-size: 0.95rem; margin: 0.5rem 0;">
-                                        ผู้สั่งเช่า: <strong><?= htmlspecialchars($ord['full_name'] ?: $ord['username'], ENT_QUOTES, 'UTF-8') ?></strong> (<?= htmlspecialchars($ord['username'], ENT_QUOTES, 'UTF-8') ?>)
+                                        ผู้สั่งเช่า: <strong><?= htmlspecialchars($ord['user_name'] ?? ('User #' . ($ord['user_id'] ?? '')), ENT_QUOTES, 'UTF-8') ?></strong>
                                     </div>
                                     <div style="font-size: 0.85rem; color: var(--text-light); background: #350107; padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border-gold); white-space: pre-line;">
-                                        <?= htmlspecialchars($ord['shipping_address'], ENT_QUOTES, 'UTF-8') ?>
+                                        <?= htmlspecialchars($ord['shipping_address'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                                     </div>
 
                                     <!-- Items Ordered -->
                                     <div style="margin-top: 0.75rem; font-size: 0.9rem;">
-                                        <?php 
-                                        $t_arr = explode('||', $ord['amulet_titles']);
-                                        $p_arr = explode('||', $ord['amulet_prices']);
-                                        foreach ($t_arr as $i => $title): ?>
-                                            <div>✦ <?= htmlspecialchars($title, ENT_QUOTES, 'UTF-8') ?> (฿<?= number_format((float)($p_arr[$i] ?? 0), 2) ?>)</div>
+                                        <?php foreach ($ord['items'] ?? [] as $it): ?>
+                                            <div>✦ <?= htmlspecialchars($it['title'] ?? 'พระเครื่อง', ENT_QUOTES, 'UTF-8') ?> (฿<?= number_format((float)($it['price'] ?? 0), 2) ?>)</div>
                                         <?php endforeach; ?>
                                     </div>
                                 </div>
@@ -193,21 +175,22 @@ $page_title = 'ระบบตรวจสอบสลิปและจัด�
                                         <span class="text-danger" style="font-size: 0.85rem;">ไม่มีการแนบสลิป</span>
                                     <?php endif; ?>
                                     <div style="font-size: 1.15rem; font-weight: 700; color: var(--gold-accent); margin-top: 0.75rem;">
-                                        ยอดชำระ: ฿<?= number_format((float)$ord['total_amount'], 2) ?>
+                                        ยอดชำระ: ฿<?= number_format((float)($ord['total_amount'] ?? 0), 2) ?>
                                     </div>
                                 </div>
 
                                 <!-- Order Management Action Form -->
                                 <form method="POST" action="orders.php" style="background: #350107; padding: 1rem; border-radius: 6px; border: 1px solid var(--border-gold);">
-                                    <input type="hidden" name="order_id" value="<?= (int)$ord['id'] ?>">
+                                    <input type="hidden" name="order_id" value="<?= htmlspecialchars((string)$ord['id'], ENT_QUOTES, 'UTF-8') ?>">
 
                                     <div class="form-group" style="margin-bottom: 0.75rem;">
                                         <label class="form-label" style="font-size: 0.85rem;">เปลี่ยนสถานะ</label>
+                                        <?php $cur_st = $ord['status'] ?? 'pending_verification'; ?>
                                         <select name="status" class="form-control" style="font-size: 0.85rem; padding: 0.4rem;">
-                                            <option value="pending_verification" <?= ($ord['status'] === 'pending_verification') ? 'selected' : '' ?>>1. รอตรวจสอบสลิป</option>
-                                            <option value="preparing" <?= ($ord['status'] === 'preparing') ? 'selected' : '' ?>>2. เตรียมจัดส่ง</option>
-                                            <option value="shipped" <?= ($ord['status'] === 'shipped') ? 'selected' : '' ?>>3. จัดส่งแล้ว</option>
-                                            <option value="cancelled" <?= ($ord['status'] === 'cancelled') ? 'selected' : '' ?>>4. ยกเลิกคำสั่งซื้อ</option>
+                                            <option value="pending_verification" <?= ($cur_st === 'pending_verification') ? 'selected' : '' ?>>1. รอตรวจสอบสลิป</option>
+                                            <option value="preparing" <?= ($cur_st === 'preparing') ? 'selected' : '' ?>>2. เตรียมจัดส่ง</option>
+                                            <option value="shipped" <?= ($cur_st === 'shipped') ? 'selected' : '' ?>>3. จัดส่งแล้ว</option>
+                                            <option value="cancelled" <?= ($cur_st === 'cancelled') ? 'selected' : '' ?>>4. ยกเลิกคำสั่งซื้อ</option>
                                         </select>
                                     </div>
 
@@ -241,4 +224,3 @@ $page_title = 'ระบบตรวจสอบสลิปและจัด�
     </script>
 </body>
 </html>
-

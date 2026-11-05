@@ -1,8 +1,8 @@
 <?php
 /**
- * Admin Category CRUD Management
+ * Admin Category CRUD Management (100% Firebase Firestore)
  * 
- * Lists, creates, and updates amulet categories.
+ * Lists, creates, and updates amulet categories directly on Firestore.
  * 
  * @package AmuletPlatform
  */
@@ -12,24 +12,22 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/admin_guard.php';
 $admin_user = require_admin();
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
-$pdo = get_db_connection();
+$fs = get_firestore();
 $errors = [];
 $success_msg = '';
 
-$edit_id = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
+$edit_id = isset($_GET['edit']) ? (string)$_GET['edit'] : '';
 $edit_category = null;
 
-if ($edit_id > 0) {
-    $stmt = $pdo->prepare("SELECT * FROM categories WHERE id = :id LIMIT 1");
-    $stmt->execute(['id' => $edit_id]);
-    $edit_category = $stmt->fetch();
+if (!empty($edit_id)) {
+    $edit_category = $fs->getDocument('categories', $edit_id);
 }
 
 // Process Add / Edit Category
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $cat_id = (int)($_POST['category_id'] ?? 0);
+    $cat_id = trim((string)($_POST['category_id'] ?? ''));
     $name = trim($_POST['name'] ?? '');
     $slug = trim($_POST['slug'] ?? '');
     $description = trim($_POST['description'] ?? '');
@@ -38,44 +36,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'กรุณากรอกชื่อหมวดหมู่';
     }
     if (empty($slug)) {
-        // Auto-generate slug from name if empty
         $slug = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower(str_replace(' ', '-', $name))) ?: 'cat-' . time();
     }
 
     if (empty($errors)) {
         try {
-            if ($cat_id > 0) {
-                $stmt = $pdo->prepare("UPDATE categories SET name = :name, slug = :slug, description = :description WHERE id = :id");
-                $stmt->execute([
+            if (!empty($cat_id)) {
+                $fs->updateDocument('categories', $cat_id, [
                     'name' => $name,
                     'slug' => $slug,
                     'description' => $description,
-                    'id' => $cat_id
                 ]);
                 $success_msg = 'อัปเดตข้อมูลหมวดหมู่เรียบร้อยแล้ว';
                 $edit_category = null;
             } else {
-                $stmt = $pdo->prepare("INSERT INTO categories (name, slug, description) VALUES (:name, :slug, :description)");
-                $stmt->execute([
+                $newId = $fs->getNextId('categories');
+                $fs->setDocument('categories', $newId, [
                     'name' => $name,
                     'slug' => $slug,
                     'description' => $description,
+                    'created_at' => date('Y-m-d H:i:s'),
                 ]);
                 $success_msg = 'เพิ่มหมวดหมู่ใหม่สำเร็จ';
             }
-        } catch (PDOException $e) {
-            error_log('[CATEGORY ERROR] ' . $e->getMessage());
-            $errors[] = 'เกิดข้อผิดพลาด: ชื่อหมวดหมู่หรือ Slug อาจซ้ำกับที่มีอยู่แล้ว';
+        } catch (Exception $e) {
+            error_log('[CATEGORY FIRESTORE ERROR] ' . $e->getMessage());
+            $errors[] = 'เกิดข้อผิดพลาดในการบันทึกหมวดหมู่';
         }
     }
 }
 
-// Fetch categories along with amulet counts
-$categories = $pdo->query("SELECT c.*, COUNT(a.id) AS total_amulets 
-                          FROM categories c 
-                          LEFT JOIN amulets a ON c.id = a.category_id 
-                          GROUP BY c.id 
-                          ORDER BY c.id ASC")->fetchAll();
+// Fetch categories and count amulets per category
+$categories = $fs->listDocuments('categories');
+$all_amulets = $fs->listDocuments('amulets');
+
+$amulet_counts = [];
+foreach ($all_amulets as $am) {
+    $cId = (string)($am['category_id'] ?? '');
+    $amulet_counts[$cId] = ($amulet_counts[$cId] ?? 0) + 1;
+}
 
 $page_title = 'จัดการหมวดหมู่พระเครื่อง (Categories)';
 ?>
@@ -100,6 +99,7 @@ $page_title = 'จัดการหมวดหมู่พระเครื�
                     <li><a href="amulets.php" class="nav-link">จัดการพระเครื่อง</a></li>
                     <li><a href="categories.php" class="nav-link active">หมวดหมู่</a></li>
                     <li><a href="orders.php" class="nav-link">ตรวจสอบสลิป</a></li>
+                    <li><a href="auctions.php" class="nav-link">จัดการประมูล</a></li>
                     <li><a href="../logout.php" class="btn btn-outline-gold">ออกจากระบบ</a></li>
                 </ul>
             </nav>
@@ -109,7 +109,7 @@ $page_title = 'จัดการหมวดหมู่พระเครื�
     <main class="site-main">
         <div class="container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                <h1>จัดการหมวดหมู่พระเครื่อง</h1>
+                <h1>จัดการหมวดหมู่พระเครื่อง (Cloud Firestore)</h1>
                 <a href="amulets.php" class="btn btn-outline-gold">&larr; ไปยังระบบจัดการพระเครื่อง</a>
             </div>
 
@@ -134,7 +134,7 @@ $page_title = 'จัดการหมวดหมู่พระเครื�
                 <div class="card" style="padding: 1.5rem;">
                     <h3><?= $edit_category ? 'แก้ไขหมวดหมู่' : '+ เพิ่มหมวดหมู่ใหม่' ?></h3>
                     <form method="POST" action="categories.php" style="margin-top: 1rem;">
-                        <input type="hidden" name="category_id" value="<?= (int)($edit_category['id'] ?? 0) ?>">
+                        <input type="hidden" name="category_id" value="<?= htmlspecialchars((string)($edit_category['id'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
 
                         <div class="form-group">
                             <label class="form-label" for="name">ชื่อหมวดหมู่ *</label>
@@ -176,22 +176,23 @@ $page_title = 'จัดการหมวดหมู่พระเครื�
                         </thead>
                         <tbody>
                             <?php foreach ($categories as $cat): ?>
+                                <?php $count = $amulet_counts[(string)$cat['id']] ?? 0; ?>
                                 <tr style="border-bottom: 1px solid rgba(233, 215, 147, 0.15);">
                                     <td style="padding: 0.75rem 0.5rem;">
-                                        <strong><?= htmlspecialchars($cat['name'], ENT_QUOTES, 'UTF-8') ?></strong>
+                                        <strong><?= htmlspecialchars($cat['name'] ?? '', ENT_QUOTES, 'UTF-8') ?></strong>
                                         <div style="font-size: 0.8rem; color: var(--text-light); opacity: 0.8;">
                                             <?= htmlspecialchars($cat['description'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                                         </div>
                                     </td>
                                     <td style="padding: 0.75rem 0.5rem; color: var(--text-light); font-size: 0.85rem;">
-                                        <?= htmlspecialchars($cat['slug'], ENT_QUOTES, 'UTF-8') ?>
+                                        <?= htmlspecialchars($cat['slug'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                                     </td>
                                     <td style="padding: 0.75rem 0.5rem; text-align: center; color: var(--gold-accent); font-weight: 700;">
-                                        <?= $cat['total_amulets'] ?>
+                                        <?= $count ?>
                                     </td>
                                     <td style="padding: 0.75rem 0.5rem; text-align: center;">
                                         <a href="categories.php?edit=<?= $cat['id'] ?>" class="btn btn-outline-gold" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">แก้ไข</a>
-                                        <?php if ((int)$cat['total_amulets'] === 0): ?>
+                                        <?php if ($count === 0): ?>
                                             <a href="category_delete.php?id=<?= $cat['id'] ?>" class="btn btn-outline-gold" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-color: var(--danger); color: #ff8b94;" onclick="return confirm('ยืนยันการลบหมวดหมู่นี้?');">ลบ</a>
                                         <?php endif; ?>
                                     </td>
@@ -211,4 +212,3 @@ $page_title = 'จัดการหมวดหมู่พระเครื�
     </footer>
 </body>
 </html>
-

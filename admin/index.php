@@ -1,8 +1,8 @@
 <?php
 /**
- * Admin Panel Dashboard
+ * Admin Panel Dashboard (100% Firebase Firestore)
  * 
- * Provides administrative overview, metrics, and navigation.
+ * Provides administrative overview, metrics, and navigation powered by Firestore.
  * 
  * @package AmuletPlatform
  */
@@ -12,15 +12,25 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/admin_guard.php';
 $admin_user = require_admin();
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
-$pdo = get_db_connection();
+$fs = get_firestore();
 
-// Collect dashboard summary statistics
-$stat_amulets = $pdo->query("SELECT COUNT(*) FROM amulets")->fetchColumn();
-$stat_users = $pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
-$stat_auctions = $pdo->query("SELECT COUNT(*) FROM auctions WHERE status = 'active'")->fetchColumn();
-$stat_orders = $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'pending_verification'")->fetchColumn();
+// Collect dashboard summary statistics directly from Firestore
+$stat_amulets = count($fs->listDocuments('amulets'));
+$stat_users = count($fs->listDocuments('users'));
+
+$all_auctions = $fs->listDocuments('auctions');
+$stat_auctions = 0;
+foreach ($all_auctions as $a) {
+    if (($a['status'] ?? '') === 'active') $stat_auctions++;
+}
+
+$all_orders = $fs->listDocuments('orders');
+$stat_orders = 0;
+foreach ($all_orders as $o) {
+    if (($o['status'] ?? '') === 'pending_verification') $stat_orders++;
+}
 
 $page_title = 'แผงควบคุมระบบ (Admin CMS)';
 ?>
@@ -43,7 +53,9 @@ $page_title = 'แผงควบคุมระบบ (Admin CMS)';
                 <ul>
                     <li><a href="../index.php" class="nav-link" target="_blank">หน้าร้านจริง ↗</a></li>
                     <li><a href="amulets.php" class="nav-link">จัดการพระเครื่อง</a></li>
+                    <li><a href="categories.php" class="nav-link">หมวดหมู่</a></li>
                     <li><a href="orders.php" class="nav-link">ตรวจสอบสลิป</a></li>
+                    <li><a href="auctions.php" class="nav-link">จัดการประมูล</a></li>
                     <li><a href="../logout.php" class="btn btn-outline-gold">ออกจากระบบ</a></li>
                 </ul>
             </nav>
@@ -55,7 +67,7 @@ $page_title = 'แผงควบคุมระบบ (Admin CMS)';
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                 <div>
                     <h1>ยินดีต้อนรับ, <?= htmlspecialchars($admin_user['full_name'] ?: $admin_user['username'], ENT_QUOTES, 'UTF-8') ?></h1>
-                    <p class="text-light">ระบบศูนย์กลางการควบคุมพระเครื่องและประมูลออนไลน์</p>
+                    <p class="text-light">ระบบศูนย์กลางการควบคุมพระเครื่องและประมูลออนไลน์ (Firestore Cloud Mode)</p>
                 </div>
                 <div>
                     <a href="amulet_form.php" class="btn btn-gold">+ ลงทะเบียนพระเครื่ององค์ใหม่</a>
@@ -95,7 +107,9 @@ $page_title = 'แผงควบคุมระบบ (Admin CMS)';
                 <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
                     <a href="amulet_form.php" class="btn btn-gold">+ เพิ่มพระเครื่องใหม่</a>
                     <a href="amulets.php" class="btn btn-outline-gold">ดูรายการพระเครื่องทั้งหมด</a>
+                    <a href="categories.php" class="btn btn-outline-gold">จัดการหมวดหมู่</a>
                     <a href="orders.php" class="btn btn-outline-gold">ระบบตรวจสอบสลิปโอนเงิน</a>
+                    <a href="auctions.php" class="btn btn-outline-gold">จัดการห้องประมูลสด</a>
                 </div>
             </div>
         </div>
@@ -103,7 +117,7 @@ $page_title = 'แผงควบคุมระบบ (Admin CMS)';
 
     <footer class="site-footer">
         <div class="container">
-            <p>&copy; <?= date('Y') ?> Amulet Siam Admin CMS Panel.</p>
+            <p>&copy; <?= date('Y') ?> Amulet Siam Admin CMS Panel (Cloud Firestore).</p>
         </div>
     </footer>
 </body>

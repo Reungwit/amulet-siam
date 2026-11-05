@@ -1,8 +1,8 @@
 <?php
 /**
- * User Login Page
+ * User Login Page (100% Firebase Firestore)
  * 
- * Verifies credentials against MySQL using password_verify() and sets session data.
+ * Verifies credentials against Firestore users collection using password_verify()
  * 
  * @package AmuletPlatform
  */
@@ -23,7 +23,7 @@ if (isset($_SESSION['user'])) {
     exit;
 }
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
 
 $page_title = 'เข้าสู่ระบบ';
 $error = '';
@@ -36,24 +36,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'กรุณากรอกชื่อผู้ใช้/อีเมล และรหัสผ่าน';
     } else {
         try {
-            $pdo = get_db_connection();
-            $stmt = $pdo->prepare("SELECT id, username, email, password_hash, full_name, role FROM users WHERE username = :id_user OR email = :id_email LIMIT 1");
-            $stmt->execute(['id_user' => $identifier, 'id_email' => $identifier]);
-            $user = $stmt->fetch();
+            $fs = get_firestore();
+            $users = $fs->listDocuments('users');
 
-            if ($user && password_verify($password, $user['password_hash'])) {
-                // Regenerate session id to prevent session fixation
+            $matched_user = null;
+            foreach ($users as $u) {
+                if (strcasecmp($u['username'] ?? '', $identifier) === 0 || strcasecmp($u['email'] ?? '', $identifier) === 0) {
+                    $matched_user = $u;
+                    break;
+                }
+            }
+
+            if ($matched_user && !empty($matched_user['password_hash']) && password_verify($password, $matched_user['password_hash'])) {
                 session_regenerate_id(true);
 
                 $_SESSION['user'] = [
-                    'id' => (int)$user['id'],
-                    'username' => $user['username'],
-                    'email' => $user['email'],
-                    'full_name' => $user['full_name'],
-                    'role' => $user['role'],
+                    'id' => $matched_user['id'],
+                    'username' => $matched_user['username'],
+                    'email' => $matched_user['email'],
+                    'full_name' => $matched_user['full_name'] ?? '',
+                    'role' => $matched_user['role'] ?? 'user',
                 ];
 
-                if ($user['role'] === 'admin') {
+                $redirect = $_GET['redirect'] ?? '';
+                if ($redirect && !str_starts_with($redirect, 'http')) {
+                    header('Location: ' . $redirect);
+                } elseif ($matched_user['role'] === 'admin') {
                     header('Location: admin/index.php');
                 } else {
                     header('Location: index.php');
@@ -62,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $error = 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง';
             }
-        } catch (PDOException $e) {
+        } catch (Exception $e) {
             error_log('[LOGIN ERROR] ' . $e->getMessage());
             $error = 'เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง';
         }
@@ -81,7 +89,7 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 
-    <form method="POST" action="login.php">
+    <form method="POST" action="login.php<?= isset($_GET['redirect']) ? '?redirect=' . urlencode($_GET['redirect']) : '' ?>">
         <div class="form-group">
             <label class="form-label" for="identifier">ชื่อผู้ใช้งาน หรือ อีเมล</label>
             <input type="text" id="identifier" name="identifier" class="form-control" value="<?= htmlspecialchars($_POST['identifier'] ?? '', ENT_QUOTES, 'UTF-8') ?>" required autofocus>
@@ -101,4 +109,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

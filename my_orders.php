@@ -1,8 +1,8 @@
 <?php
 /**
- * Customer Order History & Tracking
+ * Customer Order History & Tracking (100% Firebase Firestore)
  * 
- * Lists current user's past and active orders with payment status & tracking numbers.
+ * Lists current user's past and active orders from Firestore orders collection.
  * 
  * @package AmuletPlatform
  */
@@ -13,7 +13,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
 
 if (!isset($_SESSION['user'])) {
     header('Location: login.php?redirect=my_orders.php');
@@ -21,20 +21,21 @@ if (!isset($_SESSION['user'])) {
 }
 
 $user = $_SESSION['user'];
-$pdo = get_db_connection();
+$fs = get_firestore();
 
-// Fetch orders belonging to user
-$stmt = $pdo->prepare("SELECT o.*, 
-                              GROUP_CONCAT(a.title SEPARATOR '||') AS amulet_titles,
-                              GROUP_CONCAT(a.price SEPARATOR '||') AS amulet_prices
-                       FROM orders o
-                       JOIN order_items oi ON o.id = oi.order_id
-                       JOIN amulets a ON oi.amulet_id = a.id
-                       WHERE o.user_id = :user_id
-                       GROUP BY o.id
-                       ORDER BY o.id DESC");
-$stmt->execute(['user_id' => $user['id']]);
-$orders = $stmt->fetchAll();
+// Fetch orders belonging to user from Firestore
+$all_orders = $fs->listDocuments('orders');
+$orders = [];
+foreach ($all_orders as $ord) {
+    if ((string)($ord['user_id'] ?? '') === (string)$user['id']) {
+        $orders[] = $ord;
+    }
+}
+
+// Sort newest first
+usort($orders, function($a, $b) {
+    return strcmp($b['created_at'] ?? '', $a['created_at'] ?? '');
+});
 
 $page_title = 'ประวัติคำสั่งเช่าบูชา - Amulet Siam';
 require_once __DIR__ . '/includes/header.php';
@@ -58,17 +59,18 @@ require_once __DIR__ . '/includes/header.php';
                                 คำสั่งซื้อ #<?= str_pad((string)$order['id'], 6, '0', STR_PAD_LEFT) ?>
                             </span>
                             <span style="font-size: 0.85rem; color: var(--text-light); opacity: 0.8; margin-left: 0.75rem;">
-                                วันที่สั่ง: <?= date('d/m/Y H:i', strtotime($order['created_at'])) ?>
+                                วันที่สั่ง: <?= htmlspecialchars($order['created_at'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                             </span>
                         </div>
                         <div>
-                            <?php if ($order['status'] === 'pending_verification'): ?>
+                            <?php $st = $order['status'] ?? 'pending_verification'; ?>
+                            <?php if ($st === 'pending_verification'): ?>
                                 <span class="badge" style="background: #e09f3e; color: #1c0003;">รอตรวจสอบสลิป</span>
-                            <?php elseif ($order['status'] === 'preparing'): ?>
+                            <?php elseif ($st === 'preparing'): ?>
                                 <span class="badge" style="background: #3a86ff; color: #ffffff;">กำลังเตรียมจัดส่ง</span>
-                            <?php elseif ($order['status'] === 'shipped'): ?>
+                            <?php elseif ($st === 'shipped'): ?>
                                 <span class="badge" style="background: var(--success); color: #ffffff;">จัดส่งแล้ว</span>
-                            <?php elseif ($order['status'] === 'cancelled'): ?>
+                            <?php elseif ($st === 'cancelled'): ?>
                                 <span class="badge" style="background: var(--danger); color: #ffffff;">ยกเลิกคำสั่งซื้อ</span>
                             <?php endif; ?>
                         </div>
@@ -76,13 +78,10 @@ require_once __DIR__ . '/includes/header.php';
 
                     <!-- Items List -->
                     <div style="margin-bottom: 1rem;">
-                        <?php 
-                        $titles = explode('||', $order['amulet_titles']);
-                        $prices = explode('||', $order['amulet_prices']);
-                        foreach ($titles as $idx => $t): ?>
+                        <?php foreach ($order['items'] ?? [] as $item): ?>
                             <div style="display: flex; justify-content: space-between; padding: 0.35rem 0; font-size: 0.95rem; color: var(--text-light);">
-                                <span>✦ <?= htmlspecialchars($t, ENT_QUOTES, 'UTF-8') ?></span>
-                                <span style="color: var(--gold-accent);">฿<?= number_format((float)($prices[$idx] ?? 0), 2) ?></span>
+                                <span>✦ <?= htmlspecialchars($item['title'] ?? 'พระเครื่อง', ENT_QUOTES, 'UTF-8') ?></span>
+                                <span style="color: var(--gold-accent);">฿<?= number_format((float)($item['price'] ?? 0), 2) ?></span>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -101,7 +100,7 @@ require_once __DIR__ . '/includes/header.php';
                         </div>
                         <div style="text-align: right;">
                             <span style="font-size: 0.9rem; color: var(--text-light);">ยอดรวมสุทธิ: </span>
-                            <span style="font-size: 1.3rem; font-weight: 700; color: var(--gold-accent);">฿<?= number_format((float)$order['total_amount'], 2) ?></span>
+                            <span style="font-size: 1.3rem; font-weight: 700; color: var(--gold-accent);">฿<?= number_format((float)($order['total_amount'] ?? 0), 2) ?></span>
                         </div>
                     </div>
                 </div>
@@ -111,4 +110,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

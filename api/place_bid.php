@@ -1,10 +1,9 @@
 <?php
 /**
- * AJAX API: Place Auction Bid
+ * AJAX API: Place Auction Bid (100% Firebase Firestore)
  * 
- * Handles bid placement via POST, verifies minimum bid increments,
- * enforces Anti-Snipe (+3 minutes if bid placed in last 60 seconds),
- * and records bid history atomically.
+ * Handles bid placement via POST directly on Firestore auctions & bids collections,
+ * verifying minimum bid increments and enforcing Anti-Snipe (+3 minutes).
  * 
  * @package AmuletPlatform
  */
@@ -29,59 +28,46 @@ if (!isset($_SESSION['user'])) {
     exit;
 }
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
 $user = $_SESSION['user'];
 $raw_input = file_get_contents('php://input');
 $json_data = json_decode($raw_input, true);
 
-$auction_id = (int)($json_data['auction_id'] ?? $_POST['auction_id'] ?? 0);
+$auction_id = (string)($json_data['auction_id'] ?? $_POST['auction_id'] ?? '');
 $bid_amount = (float)($json_data['bid_amount'] ?? $_POST['bid_amount'] ?? 0);
 
-if ($auction_id <= 0 || $bid_amount <= 0) {
+if (empty($auction_id) || $bid_amount <= 0) {
     echo json_encode(['success' => false, 'message' => 'ข้อมูลการประมูลไม่ถูกต้อง'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 try {
-    $pdo = get_db_connection();
-    $pdo->beginTransaction();
-
-    // Lock auction row for update to prevent race conditions
-    $stmt = $pdo->prepare("SELECT a.*, am.title 
-                           FROM auctions a 
-                           JOIN amulets am ON a.amulet_id = am.id 
-                           WHERE a.id = :id FOR UPDATE");
-    $stmt->execute(['id' => $auction_id]);
-    $auction = $stmt->fetch();
+    $fs = get_firestore();
+    $auction = $fs->getDocument('auctions', $auction_id);
 
     if (!$auction) {
-        $pdo->rollBack();
-        echo json_encode(['success' => false, 'message' => 'ไม่พบห้องประมูลนี้ในระบบ'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'message' => 'ไม่พบห้องประมูลนี้ในระบบ Firestore'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     $current_time = time();
-    $end_time = strtotime($auction['end_time']);
+    $end_time = strtotime($auction['end_time'] ?? '');
 
-    // Check if auction is active and not expired
-    if ($auction['status'] !== 'active' || $current_time >= $end_time) {
-        // If expired, ensure status is marked as ended
-        if ($auction['status'] === 'active' && $current_time >= $end_time) {
-            $end_stmt = $pdo->prepare("UPDATE auctions SET status = 'ended' WHERE id = :id");
-            $end_stmt->execute(['id' => $auction_id]);
+    // Check if expired
+    if (($auction['status'] ?? 'active') !== 'active' || $current_time >= $end_time) {
+        if (($auction['status'] ?? '') === 'active' && $current_time >= $end_time) {
+            $fs->updateDocument('auctions', $auction_id, ['status' => 'ended']);
         }
-        $pdo->commit();
         echo json_encode(['success' => false, 'message' => 'การประมูลรายการนี้สิ้นสุดลงแล้ว'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    $current_price = (float)$auction['current_price'];
-    $min_increment = (float)$auction['min_bid_increment'];
+    $current_price = (float)($auction['current_price'] ?? 0);
+    $min_increment = (float)($auction['min_bid_increment'] ?? 100);
     $min_required_bid = $current_price + $min_increment;
 
     if ($bid_amount < $min_required_bid) {
-        $pdo->rollBack();
         echo json_encode([
             'success' => false, 
             'message' => "ราคาเสนอต้องไม่ต่ำกว่า ฿" . number_format($min_required_bid, 2) . " (ขั้นต่ำเพิ่มครั้งละ ฿" . number_format($min_increment, 2) . ")"
@@ -89,42 +75,34 @@ try {
         exit;
     }
 
-    // Anti-Snipe Logic: If bid placed within the last 60 seconds, add 3 minutes (+180s)
+    // Anti-Snipe Logic (+3 minutes if placed in last 60s)
     $remaining_seconds = $end_time - $current_time;
     $anti_snipe_applied = false;
     $new_end_time_str = $auction['end_time'];
 
     if ($remaining_seconds > 0 && $remaining_seconds <= 60) {
-        $new_end_timestamp = $end_time + 180; // + 3 minutes
+        $new_end_timestamp = $end_time + 180;
         $new_end_time_str = date('Y-m-d H:i:s', $new_end_timestamp);
         $anti_snipe_applied = true;
     }
 
-    // 1. Insert into bids history
-    $bid_stmt = $pdo->prepare("INSERT INTO bids (auction_id, user_id, bid_amount) VALUES (:aid, :uid, :amount)");
-    $bid_stmt->execute([
-        'aid' => $auction_id,
-        'uid' => $user['id'],
-        'amount' => $bid_amount,
+    // 1. Insert into bids in Firestore
+    $bidId = $fs->getNextId('bids');
+    $fs->setDocument('bids', $bidId, [
+        'auction_id' => $auction_id,
+        'user_id' => (string)$user['id'],
+        'username' => $user['username'],
+        'bid_amount' => $bid_amount,
+        'created_at' => date('Y-m-d H:i:s'),
     ]);
 
-    // 2. Update auction current_price, winner_id, and end_time (if anti-snipe applied)
-    $update_stmt = $pdo->prepare("UPDATE auctions SET 
-                                  current_price = :price, 
-                                  winner_id = :winner, 
-                                  end_time = :end_time 
-                                  WHERE id = :id");
-    $update_stmt->execute([
-        'price' => $bid_amount,
-        'winner' => $user['id'],
+    // 2. Update auction in Firestore
+    $fs->updateDocument('auctions', $auction_id, [
+        'current_price' => $bid_amount,
+        'winner_id' => (string)$user['id'],
+        'winner_username' => $user['username'],
         'end_time' => $new_end_time_str,
-        'id' => $auction_id,
     ]);
-
-    $pdo->commit();
-
-    error_log(sprintf('[%s] [AUCTION] User %s placed bid ฿%s on auction #%d (Anti-snipe: %s)', 
-        date('c'), $user['username'], number_format($bid_amount, 2), $auction_id, $anti_snipe_applied ? 'YES' : 'NO'));
 
     echo json_encode([
         'success' => true,
@@ -136,11 +114,7 @@ try {
         'remaining_seconds' => strtotime($new_end_time_str) - time(),
     ], JSON_UNESCAPED_UNICODE);
 
-} catch (PDOException $e) {
-    if (isset($pdo) && $pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-    error_log('[PLACE BID ERROR] ' . $e->getMessage());
+} catch (Exception $e) {
+    error_log('[FIRESTORE BID ERROR] ' . $e->getMessage());
     echo json_encode(['success' => false, 'message' => 'เกิดข้อผิดพลาดในการประมวลผลการประมูล'], JSON_UNESCAPED_UNICODE);
 }
-

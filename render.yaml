@@ -12,3 +12,4 @@ services:
         value: amuletsiam
       - key: FIREBASE_API_KEY
         value: AIzaSyDtNfbfvspe5LeQHBi8Vtl8sjEC4Aitq9g
+

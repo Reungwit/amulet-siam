@@ -1,8 +1,8 @@
 <?php
 /**
- * Admin Category Delete Handler
+ * Admin Category Delete Handler (100% Firebase Firestore)
  * 
- * Removes empty categories.
+ * Removes empty categories from Firestore.
  * 
  * @package AmuletPlatform
  */
@@ -12,21 +12,26 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/admin_guard.php';
 $admin_user = require_admin();
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
-$cat_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$cat_id = isset($_GET['id']) ? (string)$_GET['id'] : '';
 
-if ($cat_id > 0) {
-    $pdo = get_db_connection();
+if (!empty($cat_id)) {
+    $fs = get_firestore();
+    $amulets = $fs->listDocuments('amulets');
 
-    // Ensure category has no associated amulets before deleting
-    $count = (int)$pdo->query("SELECT COUNT(*) FROM amulets WHERE category_id = {$cat_id}")->fetchColumn();
-    if ($count === 0) {
-        $stmt = $pdo->prepare("DELETE FROM categories WHERE id = :id");
-        $stmt->execute(['id' => $cat_id]);
+    $has_amulets = false;
+    foreach ($amulets as $am) {
+        if ((string)($am['category_id'] ?? '') === (string)$cat_id) {
+            $has_amulets = true;
+            break;
+        }
+    }
+
+    if (!$has_amulets) {
+        $fs->deleteDocument('categories', $cat_id);
     }
 }
 
 header('Location: categories.php');
 exit;
-

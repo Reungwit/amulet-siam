@@ -1,15 +1,15 @@
 <?php
 /**
- * User Registration Page
+ * User Registration Page (100% Firebase Firestore)
  * 
- * Handles new account creation with bcrypt password hashing and validation.
+ * Handles new account creation with bcrypt password hashing in Firestore users collection.
  * 
  * @package AmuletPlatform
  */
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
 
 $page_title = 'สมัครสมาชิกใหม่';
 $errors = [];
@@ -39,27 +39,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors)) {
         try {
-            $pdo = get_db_connection();
-            // Check if username or email already exists
-            $stmt = $pdo->prepare("SELECT id FROM users WHERE username = :username OR email = :email LIMIT 1");
-            $stmt->execute(['username' => $username, 'email' => $email]);
-            if ($stmt->fetch()) {
+            $fs = get_firestore();
+            $existing_users = $fs->listDocuments('users');
+
+            $duplicate = false;
+            foreach ($existing_users as $u) {
+                if (strcasecmp($u['username'] ?? '', $username) === 0 || strcasecmp($u['email'] ?? '', $email) === 0) {
+                    $duplicate = true;
+                    break;
+                }
+            }
+
+            if ($duplicate) {
                 $errors[] = 'ชื่อผู้ใช้หรืออีเมลนี้ถูกใช้งานไปแล้วในระบบ';
             } else {
                 $password_hash = password_hash($password, PASSWORD_BCRYPT);
-                $insert = $pdo->prepare("INSERT INTO users (username, email, password_hash, full_name, phone, role) 
-                                         VALUES (:username, :email, :password_hash, :full_name, :phone, 'user')");
-                $insert->execute([
+                $newId = $fs->getNextId('users');
+
+                $fs->setDocument('users', $newId, [
                     'username' => $username,
                     'email' => $email,
                     'password_hash' => $password_hash,
                     'full_name' => $full_name,
                     'phone' => $phone,
+                    'address' => '',
+                    'role' => 'user',
+                    'created_at' => date('Y-m-d H:i:s'),
                 ]);
 
                 $success_msg = 'สมัครสมาชิกสำเร็จ! ท่านสามารถเข้าสู่ระบบได้ทันที';
             }
-        } catch (PDOException $e) {
+        } catch (Exception $e) {
             error_log('[REGISTRATION ERROR] ' . $e->getMessage());
             $errors[] = 'เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่อีกครั้ง';
         }
@@ -129,4 +139,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

@@ -6,7 +6,7 @@ A web platform for Thai amulet direct sales and real-time auctions with custom s
 ## Tech Stack
 - Frontend: HTML5, Custom CSS3, Vanilla JavaScript (Fetch API & HTML5 Canvas), Firebase Client SDK (Real-Time listener)
 - Backend: PHP 8+ (Native REST Client, Sessions)
-- Database: Firebase Firestore (NoSQL) & MySQL (Legacy / Migration Source)
+- Database: Google Cloud Firebase Firestore 100% (NoSQL Collections: `categories`, `amulets`, `users`, `orders`, `auctions`, `bids`, `_meta`)
 - Timezone: Asia/Bangkok (+07:00 Thailand)
 - Communication: HTTP POST throughout the platform
 - Color Palette:

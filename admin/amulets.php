@@ -1,8 +1,8 @@
 <?php
 /**
- * Admin Amulet List Management
+ * Admin Amulet List Management (100% Firebase Firestore)
  * 
- * Displays all registered amulets with filters, thumbnails, and action triggers.
+ * Displays all registered amulets from Firestore with category resolution and action triggers.
  * 
  * @package AmuletPlatform
  */
@@ -12,19 +12,23 @@ declare(strict_types=1);
 require_once __DIR__ . '/../includes/admin_guard.php';
 $admin_user = require_admin();
 
-require_once __DIR__ . '/../includes/db_connect.php';
+require_once __DIR__ . '/../includes/firestore_client.php';
 
-$pdo = get_db_connection();
+$fs = get_firestore();
 
-// Fetch amulets along with their category name and spiritual stats
-$query = "SELECT a.*, c.name AS category_name, 
-                 s.protection, s.popularity, s.charm, s.evasion, s.invincibility, s.wealth
-          FROM amulets a
-          LEFT JOIN categories c ON a.category_id = c.id
-          LEFT JOIN amulet_stats s ON a.id = s.amulet_id
-          ORDER BY a.id DESC";
-$stmt = $pdo->query($query);
-$amulets = $stmt->fetchAll();
+// Fetch amulets and categories from Firestore
+$amulets = $fs->listDocuments('amulets');
+$categories_list = $fs->listDocuments('categories');
+
+$categories_map = [];
+foreach ($categories_list as $c) {
+    $categories_map[(string)$c['id']] = $c['name'] ?? '';
+}
+
+// Sort newest first by id
+usort($amulets, function($a, $b) {
+    return (int)($b['id'] ?? 0) - (int)($a['id'] ?? 0);
+});
 
 $page_title = 'จัดการรายการพระเครื่อง';
 ?>
@@ -47,7 +51,9 @@ $page_title = 'จัดการรายการพระเครื่อ�
                 <ul>
                     <li><a href="index.php" class="nav-link">แดชบอร์ด</a></li>
                     <li><a href="amulets.php" class="nav-link active">จัดการพระเครื่อง</a></li>
+                    <li><a href="categories.php" class="nav-link">หมวดหมู่</a></li>
                     <li><a href="orders.php" class="nav-link">ตรวจสอบสลิป</a></li>
+                    <li><a href="auctions.php" class="nav-link">จัดการประมูล</a></li>
                     <li><a href="../logout.php" class="btn btn-outline-gold">ออกจากระบบ</a></li>
                 </ul>
             </nav>
@@ -58,7 +64,7 @@ $page_title = 'จัดการรายการพระเครื่อ�
         <div class="container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                 <div>
-                    <h1>รายการพระเครื่องทั้งหมด</h1>
+                    <h1>รายการพระเครื่องทั้งหมด (Firestore)</h1>
                     <p class="text-light">พบทั้งหมด <?= count($amulets) ?> รายการ</p>
                 </div>
                 <div>
@@ -93,7 +99,7 @@ $page_title = 'จัดการรายการพระเครื่อ�
                         <?php if (empty($amulets)): ?>
                             <tr>
                                 <td colspan="7" style="padding: 2.5rem; text-align: center; color: var(--text-light);">
-                                    ยังไม่มีข้อมูลพระเครื่องในระบบ <a href="amulet_form.php" style="color: var(--gold-accent); text-decoration: underline;">คลิกที่นี่เพื่อเพิ่มองค์แรก</a>
+                                    ยังไม่มีข้อมูลพระเครื่องในระบบ Firestore <a href="amulet_form.php" style="color: var(--gold-accent); text-decoration: underline;">คลิกที่นี่เพื่อเพิ่มองค์แรก</a>
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -107,31 +113,33 @@ $page_title = 'จัดการรายการพระเครื่อ�
                                         <?php endif; ?>
                                     </td>
                                     <td style="padding: 0.75rem 1rem;">
-                                        <strong><?= htmlspecialchars($item['title'], ENT_QUOTES, 'UTF-8') ?></strong>
+                                        <strong><?= htmlspecialchars($item['title'] ?? '', ENT_QUOTES, 'UTF-8') ?></strong>
                                         <div style="font-size: 0.8rem; color: var(--text-light); opacity: 0.8;">
-                                            ปีสร้าง: <?= htmlspecialchars($item['year_made'] ?: 'ไม่ระบุ', ENT_QUOTES, 'UTF-8') ?>
+                                            ปีสร้าง: <?= htmlspecialchars($item['year_made'] ?? 'ไม่ระบุ', ENT_QUOTES, 'UTF-8') ?>
                                         </div>
                                     </td>
                                     <td style="padding: 0.75rem 1rem; color: var(--text-light);">
-                                        <?= htmlspecialchars($item['category_name'] ?: 'ทั่วไป', ENT_QUOTES, 'UTF-8') ?>
+                                        <?= htmlspecialchars($categories_map[(string)($item['category_id'] ?? '')] ?? 'ทั่วไป', ENT_QUOTES, 'UTF-8') ?>
                                     </td>
                                     <td style="padding: 0.75rem 1rem; font-size: 0.9rem;">
-                                        <div><?= htmlspecialchars($item['monk_name'], ENT_QUOTES, 'UTF-8') ?></div>
-                                        <div style="color: var(--text-light); opacity: 0.8;"><?= htmlspecialchars($item['temple_name'], ENT_QUOTES, 'UTF-8') ?></div>
+                                        <div><?= htmlspecialchars($item['monk_name'] ?? '', ENT_QUOTES, 'UTF-8') ?></div>
+                                        <div style="color: var(--text-light); opacity: 0.8;"><?= htmlspecialchars($item['temple_name'] ?? '', ENT_QUOTES, 'UTF-8') ?></div>
                                     </td>
                                     <td style="padding: 0.75rem 1rem;">
-                                        <?php if ($item['type'] === 'auction'): ?>
+                                        <?php if (($item['type'] ?? '') === 'auction'): ?>
                                             <span class="badge badge-auction">เปิดประมูล</span>
                                         <?php else: ?>
                                             <span class="badge badge-fixed">เช่าบูชาปกติ</span>
                                         <?php endif; ?>
                                     </td>
                                     <td style="padding: 0.75rem 1rem; font-weight: 700; color: var(--gold-accent);">
-                                        ฿<?= number_format((float)$item['price'], 2) ?>
+                                        ฿<?= number_format((float)($item['price'] ?? 0), 2) ?>
                                     </td>
                                     <td style="padding: 0.75rem 1rem; text-align: center;">
-                                        <a href="amulet_form.php?id=<?= $item['id'] ?>" class="btn btn-outline-gold" style="padding: 0.3rem 0.6rem; font-size: 0.85rem;">แก้ไข</a>
-                                        <a href="amulet_delete.php?id=<?= $item['id'] ?>" class="btn btn-outline-gold" style="padding: 0.3rem 0.6rem; font-size: 0.85rem; border-color: var(--danger); color: #ff8b94;" onclick="return confirm('ยืนยันการลบพระเครื่ององค์นี้หรือไม่?');">ลบ</a>
+                                        <div style="display: flex; gap: 0.35rem; justify-content: center;">
+                                            <a href="amulet_form.php?id=<?= $item['id'] ?>" class="btn btn-outline-gold" style="padding: 0.3rem 0.6rem; font-size: 0.85rem;">แก้ไข</a>
+                                            <a href="amulet_delete.php?id=<?= $item['id'] ?>" class="btn btn-outline-gold" style="padding: 0.3rem 0.6rem; font-size: 0.85rem; border-color: var(--danger); color: #ff8b94;" onclick="return confirm('ยืนยันการลบพระเครื่ององค์นี้หรือไม่?');">ลบ</a>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -149,4 +157,3 @@ $page_title = 'จัดการรายการพระเครื่อ�
     </footer>
 </body>
 </html>
-

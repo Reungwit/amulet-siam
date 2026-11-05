@@ -1,9 +1,9 @@
 <?php
 /**
- * Checkout & Payment Slip Upload Page
+ * Checkout & Payment Slip Upload Page (100% Firebase Firestore)
  * 
  * Enforces login, collects shipping address, accepts bank transfer slip upload,
- * and atomically creates orders & order_items records.
+ * and atomically creates orders document in Firestore while reserving amulets.
  * 
  * @package AmuletPlatform
  */
@@ -14,7 +14,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
+require_once __DIR__ . '/includes/repository.php';
 
 // Must be logged in to checkout
 if (!isset($_SESSION['user'])) {
@@ -30,17 +31,19 @@ if (empty($cart)) {
     exit;
 }
 
-$pdo = get_db_connection();
+$fs = get_firestore();
+$repo = get_amulet_repository();
 
-// Fetch cart items
-$in_placeholders = implode(',', array_fill(0, count($cart), '?'));
-$query = "SELECT a.*, c.name AS category_name 
-          FROM amulets a
-          LEFT JOIN categories c ON a.category_id = c.id
-          WHERE a.id IN ({$in_placeholders}) AND a.is_available = 1";
-$stmt = $pdo->prepare($query);
-$stmt->execute($cart);
-$cart_items = $stmt->fetchAll();
+// Fetch cart items from Firestore
+$cart_items = [];
+$total_amount = 0.0;
+foreach ($cart as $id) {
+    $item = $repo->getAmuletById((string)$id);
+    if ($item && !empty($item['is_available'])) {
+        $cart_items[] = $item;
+        $total_amount += (float)($item['price'] ?? 0);
+    }
+}
 
 if (empty($cart_items)) {
     $_SESSION['cart'] = [];
@@ -48,18 +51,11 @@ if (empty($cart_items)) {
     exit;
 }
 
-$total_amount = 0.0;
-foreach ($cart_items as $item) {
-    $total_amount += (float)$item['price'];
-}
-
 $errors = [];
 $success_order_id = null;
 
-// Fetch user profile default address and phone
-$u_stmt = $pdo->prepare("SELECT address, phone, full_name FROM users WHERE id = :id LIMIT 1");
-$u_stmt->execute(['id' => $user['id']]);
-$user_profile = $u_stmt->fetch();
+// Fetch user profile default address and phone from Firestore
+$user_profile = $fs->getDocument('users', (string)$user['id']) ?: $user;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $shipping_address = trim($_POST['shipping_address'] ?? '');
@@ -95,7 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $allowed_exts = ['jpg', 'jpeg', 'png', 'webp', 'pdf'];
         if (!in_array($file_ext, $allowed_exts, true)) {
-            $errors[] = 'ไฟล์สลิปต้องเป็นรูปภาพ (JPG, JPEG, PNG, WEBP) หรือ PDF เท่านั้น (นามสกุลปัจจุบัน: ' . htmlspecialchars($file_ext) . ')';
+            $errors[] = 'ไฟล์สลิปต้องเป็นรูปภาพ (JPG, JPEG, PNG, WEBP) หรือ PDF เท่านั้น';
         } elseif ($file_size > 20 * 1024 * 1024) {
             $errors[] = 'ขนาดไฟล์สลิปต้องไม่เกิน 20 MB';
         } else {
@@ -119,42 +115,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($errors) && $slip_path !== null) {
         try {
-            $pdo->beginTransaction();
-
-            // 1. Insert into orders table
-            $order_stmt = $pdo->prepare("INSERT INTO orders 
-                (user_id, total_amount, slip_image, status, shipping_address)
-                VALUES (:user_id, :total_amount, :slip_image, 'pending_verification', :shipping_address)");
-            $order_stmt->execute([
-                'user_id' => $user['id'],
-                'total_amount' => $total_amount,
-                'slip_image' => $slip_path,
-                'shipping_address' => "เบอร์ติดต่อ: {$phone}\nที่อยู่: {$shipping_address}",
-            ]);
-            $order_id = (int)$pdo->lastInsertId();
-
-            // 2. Insert into order_items and mark amulets as reserved / unavailable
-            $item_stmt = $pdo->prepare("INSERT INTO order_items (order_id, amulet_id, price) VALUES (:order_id, :amulet_id, :price)");
-            $update_amulet = $pdo->prepare("UPDATE amulets SET is_available = 0 WHERE id = :amulet_id");
-
+            // 1. Prepare items array
+            $order_items = [];
             foreach ($cart_items as $item) {
-                $item_stmt->execute([
-                    'order_id' => $order_id,
-                    'amulet_id' => $item['id'],
-                    'price' => $item['price'],
-                ]);
-                $update_amulet->execute(['amulet_id' => $item['id']]);
+                $order_items[] = [
+                    'amulet_id' => (string)$item['id'],
+                    'title' => $item['title'] ?? '',
+                    'price' => (float)($item['price'] ?? 0),
+                ];
             }
 
-            $pdo->commit();
+            // 2. Create Order in Firestore
+            $order_id = $fs->getNextId('orders');
+            $fs->setDocument('orders', $order_id, [
+                'user_id' => (string)$user['id'],
+                'user_name' => $user_profile['full_name'] ?: $user['username'],
+                'total_amount' => (float)$total_amount,
+                'slip_image' => $slip_path,
+                'status' => 'pending_verification',
+                'tracking_number' => '',
+                'shipping_address' => "เบอร์ติดต่อ: {$phone}\nที่อยู่: {$shipping_address}",
+                'created_at' => date('Y-m-d H:i:s'),
+                'items' => $order_items,
+            ]);
+
+            // 3. Mark amulets as reserved in Firestore
+            foreach ($cart_items as $item) {
+                $fs->updateDocument('amulets', (string)$item['id'], [
+                    'is_available' => false,
+                ]);
+            }
 
             // Clear Cart
             $_SESSION['cart'] = [];
             $success_order_id = $order_id;
 
-        } catch (PDOException $e) {
-            $pdo->rollBack();
-            error_log('[CHECKOUT ERROR] ' . $e->getMessage());
+        } catch (Exception $e) {
+            error_log('[CHECKOUT FIRESTORE ERROR] ' . $e->getMessage());
             $errors[] = 'เกิดข้อผิดพลาดในการประมวลผลคำสั่งเช่าบูชา กรุณาลองใหม่อีกครั้ง';
         }
     }
@@ -221,7 +218,7 @@ require_once __DIR__ . '/includes/header.php';
                     </h3>
 
                     <div class="form-group">
-                        <label class="form-label" for="slip">แนบไฟล์สลิปหลักฐานการโอน * (JPG, PNG, WEBP)</label>
+                        <label class="form-label" for="slip">แนบไฟล์สลิปหลักฐานการโอน * (JPG, PNG, WEBP, PDF)</label>
                         <input type="file" id="slip" name="slip" class="form-control" accept="image/*,.pdf" required>
                     </div>
 
@@ -252,8 +249,8 @@ require_once __DIR__ . '/includes/header.php';
                     <ul style="list-style: none; margin-bottom: 1.25rem;">
                         <?php foreach ($cart_items as $item): ?>
                             <li style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid rgba(233, 215, 147, 0.15); font-size: 0.9rem;">
-                                <span><?= htmlspecialchars($item['title'], ENT_QUOTES, 'UTF-8') ?></span>
-                                <span style="font-weight: 700; color: var(--gold-accent);">฿<?= number_format((float)$item['price'], 2) ?></span>
+                                <span><?= htmlspecialchars($item['title'] ?? '', ENT_QUOTES, 'UTF-8') ?></span>
+                                <span style="font-weight: 700; color: var(--gold-accent);">฿<?= number_format((float)($item['price'] ?? 0), 2) ?></span>
                             </li>
                         <?php endforeach; ?>
                     </ul>
@@ -268,4 +265,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

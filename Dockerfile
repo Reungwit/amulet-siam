@@ -37,3 +37,4 @@ EXPOSE 10000
 
 # Start Apache in foreground
 CMD ["apache2-foreground"]
+

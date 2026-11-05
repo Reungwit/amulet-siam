@@ -1,9 +1,9 @@
 <?php
 /**
- * Interactive Real-Time Auction Bidding Room
+ * Interactive Real-Time Auction Bidding Room (100% Firebase Firestore)
  * 
  * Features live countdown, HTML5 Canvas 6-point Radar Chart,
- * AJAX-based bidding with Anti-Snipe protection, and real-time polling bid history.
+ * AJAX-based bidding with Anti-Snipe protection backed by Firestore.
  * 
  * @package AmuletPlatform
  */
@@ -14,48 +14,43 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
+require_once __DIR__ . '/includes/repository.php';
 
-// Support POST (preferred) or GET fallback
-$auction_id = (int)($_POST['auction_id'] ?? $_GET['id'] ?? 0);
+$auction_id = (string)($_POST['auction_id'] ?? $_GET['id'] ?? '');
 
-if ($auction_id <= 0) {
+if (empty($auction_id)) {
     header('Location: auctions.php');
     exit;
 }
 
-$pdo = get_db_connection();
+$fs = get_firestore();
+$repo = get_amulet_repository();
 
-// Fetch auction and amulet details with spiritual stats
-$stmt = $pdo->prepare("SELECT a.*, am.title, am.monk_name, am.temple_name, am.year_made, am.image_url, am.description,
-                              c.name AS category_name,
-                              s.protection, s.popularity, s.charm, s.evasion, s.invincibility, s.wealth
-                       FROM auctions a
-                       JOIN amulets am ON a.amulet_id = am.id
-                       LEFT JOIN categories c ON am.category_id = c.id
-                       LEFT JOIN amulet_stats s ON am.id = s.amulet_id
-                       WHERE a.id = :id LIMIT 1");
-$stmt->execute(['id' => $auction_id]);
-$auction = $stmt->fetch();
+// Fetch auction from Firestore
+$auction = $fs->getDocument('auctions', $auction_id);
 
 if (!$auction) {
     header('Location: auctions.php?msg=not_found');
     exit;
 }
 
+// Fetch associated amulet
+$amulet = $repo->getAmuletById((string)($auction['amulet_id'] ?? '')) ?: [];
+
 $stats = [
-    'protection' => (int)($auction['protection'] ?? 5),
-    'popularity' => (int)($auction['popularity'] ?? 5),
-    'charm' => (int)($auction['charm'] ?? 5),
-    'evasion' => (int)($auction['evasion'] ?? 5),
-    'invincibility' => (int)($auction['invincibility'] ?? 5),
-    'wealth' => (int)($auction['wealth'] ?? 5),
+    'protection' => (int)($amulet['stats']['protection'] ?? 5),
+    'popularity' => (int)($amulet['stats']['popularity'] ?? 5),
+    'charm' => (int)($amulet['stats']['charm'] ?? 5),
+    'evasion' => (int)($amulet['stats']['evasion'] ?? 5),
+    'invincibility' => (int)($amulet['stats']['invincibility'] ?? 5),
+    'wealth' => (int)($amulet['stats']['wealth'] ?? 5),
 ];
 
 $current_user = $_SESSION['user'] ?? null;
-$next_min_bid = (float)$auction['current_price'] + (float)$auction['min_bid_increment'];
+$next_min_bid = (float)($auction['current_price'] ?? 0) + (float)($auction['min_bid_increment'] ?? 100);
 
-$page_title = 'ห้องประมูล: ' . $auction['title'];
+$page_title = 'ห้องประมูล: ' . ($amulet['title'] ?? 'พระเครื่อง');
 $extra_scripts = ['js/radar.js', 'js/auction.js'];
 require_once __DIR__ . '/includes/header.php';
 ?>
@@ -64,7 +59,7 @@ require_once __DIR__ . '/includes/header.php';
 <nav style="margin-bottom: 1.5rem; font-size: 0.9rem;">
     <a href="index.php" style="color: var(--text-light); opacity: 0.8;">หน้าแรก</a> &gt; 
     <a href="auctions.php" style="color: var(--text-light); opacity: 0.8;">ห้องประมูลสด</a> &gt; 
-    <span style="color: var(--gold-accent);"><?= htmlspecialchars($auction['title'], ENT_QUOTES, 'UTF-8') ?></span>
+    <span style="color: var(--gold-accent);"><?= htmlspecialchars($amulet['title'] ?? '', ENT_QUOTES, 'UTF-8') ?></span>
 </nav>
 
 <!-- Anti-Snipe Toast Notification -->
@@ -75,8 +70,8 @@ require_once __DIR__ . '/includes/header.php';
     <!-- Left Column: Image & Radar Chart -->
     <div>
         <div class="amulet-gallery">
-            <?php if (!empty($auction['image_url'])): ?>
-                <img src="<?= htmlspecialchars($auction['image_url'], ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($auction['title'], ENT_QUOTES, 'UTF-8') ?>">
+            <?php if (!empty($amulet['image_url'])): ?>
+                <img src="<?= htmlspecialchars($amulet['image_url'], ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($amulet['title'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
             <?php else: ?>
                 <div style="height: 320px; background: #2a0106; display: flex; align-items: center; justify-content: center; font-size: 4rem; color: var(--gold-accent);">✦</div>
             <?php endif; ?>
@@ -86,7 +81,7 @@ require_once __DIR__ . '/includes/header.php';
         <div class="chart-container" style="flex-direction: column;">
             <h3>สแตตัสพุทธคุณ 6 ด้าน (Radar Chart)</h3>
             <p class="text-light" style="font-size: 0.85rem; opacity: 0.8; margin-bottom: 0.75rem;">
-                คุณลักษณะความศักดิ์สิทธิ์ประจำองค์พระ
+                คุณลักษณะความศักดิ์สิทธิ์ประจำองค์พระ (จาก Firestore)
             </p>
             <canvas id="statChart" class="status-radar" width="400" height="400"></canvas>
         </div>
@@ -96,15 +91,15 @@ require_once __DIR__ . '/includes/header.php';
     <div>
         <div class="card" style="padding: 1.75rem; border-color: var(--gold-accent);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                <span class="badge badge-auction">ประมูลสด (Live)</span>
-                <span style="color: var(--gold-accent); font-size: 0.85rem;">หมวดหมู่: <?= htmlspecialchars($auction['category_name'] ?: 'ทั่วไป', ENT_QUOTES, 'UTF-8') ?></span>
+                <span class="badge badge-auction">ประมูลสด (Live Firestore)</span>
+                <span style="color: var(--gold-accent); font-size: 0.85rem;"><?= htmlspecialchars($amulet['monk_name'] ?? 'พระเกจิ', ENT_QUOTES, 'UTF-8') ?></span>
             </div>
 
-            <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;"><?= htmlspecialchars($auction['title'], ENT_QUOTES, 'UTF-8') ?></h1>
+            <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;"><?= htmlspecialchars($amulet['title'] ?? 'พระเครื่องเปิดประมูล', ENT_QUOTES, 'UTF-8') ?></h1>
             <p class="card-meta">
-                <?= htmlspecialchars($auction['monk_name'], ENT_QUOTES, 'UTF-8') ?> • <?= htmlspecialchars($auction['temple_name'], ENT_QUOTES, 'UTF-8') ?>
-                <?php if (!empty($auction['year_made'])): ?>
-                    (ปี <?= htmlspecialchars($auction['year_made'], ENT_QUOTES, 'UTF-8') ?>)
+                <?= htmlspecialchars($amulet['monk_name'] ?? '', ENT_QUOTES, 'UTF-8') ?> • <?= htmlspecialchars($amulet['temple_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+                <?php if (!empty($amulet['year_made'])): ?>
+                    (ปี <?= htmlspecialchars($amulet['year_made'], ENT_QUOTES, 'UTF-8') ?>)
                 <?php endif; ?>
             </p>
 
@@ -126,14 +121,14 @@ require_once __DIR__ . '/includes/header.php';
                 <div style="background: #350107; padding: 1rem; border-radius: 6px; border: 1px solid var(--border-gold);">
                     <div style="font-size: 0.8rem; color: var(--text-light); opacity: 0.8;">ราคาเริ่มต้น:</div>
                     <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-light);">
-                        ฿<?= number_format((float)$auction['start_price'], 2) ?>
+                        ฿<?= number_format((float)($auction['start_price'] ?? 0), 2) ?>
                     </div>
                 </div>
 
                 <div style="background: #350107; padding: 1rem; border-radius: 6px; border: 2px solid var(--gold-accent);">
                     <div style="font-size: 0.8rem; color: var(--gold-accent);">ราคาสูงสุดขณะนี้:</div>
                     <div id="currentAuctionPrice" style="font-size: 1.4rem; font-weight: 800; color: var(--gold-accent);">
-                        ฿<?= number_format((float)$auction['current_price'], 2) ?>
+                        ฿<?= number_format((float)($auction['current_price'] ?? 0), 2) ?>
                     </div>
                 </div>
             </div>
@@ -147,7 +142,7 @@ require_once __DIR__ . '/includes/header.php';
                         <label class="form-label" for="bidAmountInput">
                             เสนอราคาประมูล (บาท) *
                             <span style="font-size: 0.8rem; font-weight: normal; color: var(--gold-accent);">
-                                (ขั้นต่ำเพิ่มครั้งละ ฿<?= number_format((float)$auction['min_bid_increment'], 2) ?>)
+                                (ขั้นต่ำเพิ่มครั้งละ ฿<?= number_format((float)($auction['min_bid_increment'] ?? 100), 2) ?>)
                             </span>
                         </label>
                         <input type="number" id="bidAmountInput" step="100" min="<?= $next_min_bid ?>" value="<?= $next_min_bid ?>" class="form-control" style="font-size: 1.2rem; font-weight: bold; color: var(--gold-accent);" required>
@@ -197,7 +192,7 @@ require_once __DIR__ . '/includes/header.php';
             <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-gold); padding-top: 1.25rem;">
                 <h4 style="margin-bottom: 0.5rem;">ประวัติและความเป็นมา</h4>
                 <p class="text-light" style="font-size: 0.95rem; line-height: 1.7; opacity: 0.9; white-space: pre-line;">
-                    <?= htmlspecialchars($auction['description'] ?: 'ไม่มีข้อมูลรายละเอียดเพิ่มเติมสำหรับพระเครื่ององค์นี้', ENT_QUOTES, 'UTF-8') ?>
+                    <?= htmlspecialchars($amulet['description'] ?? 'ไม่มีข้อมูลรายละเอียดเพิ่มเติมสำหรับพระเครื่ององค์นี้', ENT_QUOTES, 'UTF-8') ?>
                 </p>
             </div>
         </div>
@@ -212,13 +207,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 2. Initialize Real-Time Auction Engine
     AmuletAuction.initRoom(
-        <?= (int)$auction['id'] ?>,
-        "<?= date('Y-m-d\TH:i:s+07:00', strtotime($auction['end_time'])) ?>",
-        <?= (float)$auction['current_price'] ?>,
-        <?= (float)$auction['min_bid_increment'] ?>
+        "<?= htmlspecialchars((string)$auction['id'], ENT_QUOTES, 'UTF-8') ?>",
+        "<?= date('Y-m-d\TH:i:s+07:00', strtotime($auction['end_time'] ?? '')) ?>",
+        <?= (float)($auction['current_price'] ?? 0) ?>,
+        <?= (float)($auction['min_bid_increment'] ?? 100) ?>
     );
 });
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

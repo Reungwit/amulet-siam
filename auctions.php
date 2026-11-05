@@ -1,32 +1,47 @@
 <?php
 /**
- * Real-time Auction Listings Page
+ * Real-time Auction Listings Page (100% Firebase Firestore)
  * 
- * Displays all active and upcoming auctions with live countdown timers.
- * Interacts via HTTP POST for room entry and category filtering.
+ * Displays all active and upcoming auctions from Firestore with live countdown timers.
  * 
  * @package AmuletPlatform
  */
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
+require_once __DIR__ . '/includes/repository.php';
 
-$pdo = get_db_connection();
+$fs = get_firestore();
+$repo = get_amulet_repository();
 
-// Check and update expired auctions automatically
-$pdo->query("UPDATE auctions SET status = 'ended' WHERE status = 'active' AND end_time <= NOW()");
+// Fetch all auctions from Firestore
+$all_auctions = $fs->listDocuments('auctions');
+$now_ts = time();
+$active_auctions = [];
 
-// Fetch active auctions
-$query = "SELECT a.*, am.title, am.monk_name, am.temple_name, am.image_url, am.year_made,
-                 c.name AS category_name,
-                 (SELECT COUNT(*) FROM bids WHERE auction_id = a.id) AS total_bids
-          FROM auctions a
-          JOIN amulets am ON a.amulet_id = am.id
-          LEFT JOIN categories c ON am.category_id = c.id
-          WHERE a.status = 'active'
-          ORDER BY a.end_time ASC";
-$auctions = $pdo->query($query)->fetchAll();
+foreach ($all_auctions as $auc) {
+    $end_ts = strtotime($auc['end_time'] ?? '');
+    $status = $auc['status'] ?? 'active';
+
+    // Auto mark as ended in Firestore if time passed
+    if ($status === 'active' && $end_ts <= $now_ts) {
+        $fs->updateDocument('auctions', (string)$auc['id'], ['status' => 'ended']);
+        $status = 'ended';
+    }
+
+    if ($status === 'active') {
+        // Attach amulet details
+        $amulet = $repo->getAmuletById((string)($auc['amulet_id'] ?? ''));
+        $auc['amulet'] = $amulet ?: [];
+        $active_auctions[] = $auc;
+    }
+}
+
+// Sort by ending soonest
+usort($active_auctions, function($a, $b) {
+    return strtotime($a['end_time'] ?? '') - strtotime($b['end_time'] ?? '');
+});
 
 $page_title = 'ห้องประมูลพระเครื่องยอดนิยม - Amulet Siam';
 require_once __DIR__ . '/includes/header.php';
@@ -40,9 +55,9 @@ require_once __DIR__ . '/includes/header.php';
 </section>
 
 <div style="margin-bottom: 2rem;">
-    <h2>รายการพระเครื่องที่กำลังเปิดประมูลสด (<?= count($auctions) ?> รายการ)</h2>
+    <h2>รายการพระเครื่องที่กำลังเปิดประมูลสด (<?= count($active_auctions) ?> รายการ)</h2>
 
-    <?php if (empty($auctions)): ?>
+    <?php if (empty($active_auctions)): ?>
         <div class="card" style="padding: 3.5rem; text-align: center; margin-top: 1.5rem;">
             <p class="text-light" style="font-size: 1.15rem; margin-bottom: 1rem;">ขณะนี้ยังไม่มีรายการพระเครื่องที่เปิดประมูล</p>
             <p class="text-light" style="opacity: 0.7; font-size: 0.9rem; margin-bottom: 1.5rem;">ผู้ดูแลระบบจะทำการเปิดรอบประมูลใหม่เร็วๆ นี้</p>
@@ -50,11 +65,12 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     <?php else: ?>
         <div class="grid-cards">
-            <?php foreach ($auctions as $auc): ?>
+            <?php foreach ($active_auctions as $auc): ?>
+                <?php $am = $auc['amulet']; ?>
                 <div class="card">
                     <div class="card-img-wrap" style="position: relative;">
-                        <?php if (!empty($auc['image_url'])): ?>
-                            <img src="<?= htmlspecialchars($auc['image_url'], ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($auc['title'], ENT_QUOTES, 'UTF-8') ?>">
+                        <?php if (!empty($am['image_url'])): ?>
+                            <img src="<?= htmlspecialchars($am['image_url'], ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($am['title'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
                         <?php else: ?>
                             <span style="font-size: 3rem; color: var(--gold-accent);">✦</span>
                         <?php endif; ?>
@@ -65,13 +81,12 @@ require_once __DIR__ . '/includes/header.php';
 
                     <div class="card-body">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem; font-size: 0.8rem;">
-                            <span style="color: var(--gold-accent);"><?= htmlspecialchars($auc['category_name'] ?: 'ทั่วไป', ENT_QUOTES, 'UTF-8') ?></span>
-                            <span style="color: var(--text-light); opacity: 0.8;">เคาะแล้ว: <?= (int)$auc['total_bids'] ?> ครั้ง</span>
+                            <span style="color: var(--gold-accent);"><?= htmlspecialchars($am['monk_name'] ?? 'พระเกจิ', ENT_QUOTES, 'UTF-8') ?></span>
                         </div>
 
-                        <h3 class="card-title"><?= htmlspecialchars($auc['title'], ENT_QUOTES, 'UTF-8') ?></h3>
+                        <h3 class="card-title"><?= htmlspecialchars($am['title'] ?? 'พระเครื่องเปิดประมูล', ENT_QUOTES, 'UTF-8') ?></h3>
                         <p class="card-meta">
-                            <?= htmlspecialchars($auc['monk_name'], ENT_QUOTES, 'UTF-8') ?> • <?= htmlspecialchars($auc['temple_name'], ENT_QUOTES, 'UTF-8') ?>
+                            <?= htmlspecialchars($am['temple_name'] ?? '', ENT_QUOTES, 'UTF-8') ?>
                         </p>
 
                         <!-- Countdown Bar on Card -->
@@ -83,12 +98,12 @@ require_once __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="card-price">
-                            ราคาสูงสุด: ฿<?= number_format((float)$auc['current_price'], 2) ?>
+                            ราคาสูงสุด: ฿<?= number_format((float)($auc['current_price'] ?? 0), 2) ?>
                         </div>
 
                         <!-- Submit via POST to room -->
                         <form method="POST" action="auction_room.php" style="margin-top: 1rem;">
-                            <input type="hidden" name="auction_id" value="<?= (int)$auc['id'] ?>">
+                            <input type="hidden" name="auction_id" value="<?= htmlspecialchars((string)$auc['id'], ENT_QUOTES, 'UTF-8') ?>">
                             <button type="submit" class="btn btn-gold" style="width: 100%;">
                                 🔨 เข้าสู่ห้องเคาะราคาประมูล &rarr;
                             </button>
@@ -99,7 +114,7 @@ require_once __DIR__ . '/includes/header.php';
                 <script>
                     (function() {
                         const targetElem = document.getElementById('timer_<?= $auc['id'] ?>');
-                        const endMs = new Date("<?= date('Y-m-d\TH:i:s+07:00', strtotime($auc['end_time'])) ?>").getTime();
+                        const endMs = new Date("<?= date('Y-m-d\TH:i:s+07:00', strtotime($auc['end_time'] ?? '')) ?>").getTime();
 
                         function updateCardTimer() {
                             const diff = endMs - Date.now();
@@ -123,4 +138,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

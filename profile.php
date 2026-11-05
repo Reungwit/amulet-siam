@@ -1,9 +1,8 @@
 <?php
 /**
- * User Profile & Account Settings
+ * User Profile & Account Settings (100% Firebase Firestore)
  * 
- * Allows users to view and update their full name, phone number,
- * shipping address, and password.
+ * Allows users to view and update personal data and change password via Firestore.
  * 
  * @package AmuletPlatform
  */
@@ -14,7 +13,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-require_once __DIR__ . '/includes/db_connect.php';
+require_once __DIR__ . '/includes/firestore_client.php';
 
 // Ensure user is logged in
 if (!isset($_SESSION['user'])) {
@@ -23,7 +22,7 @@ if (!isset($_SESSION['user'])) {
 }
 
 $user = $_SESSION['user'];
-$pdo = get_db_connection();
+$fs = get_firestore();
 $errors = [];
 $success_msg = '';
 
@@ -37,18 +36,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $address = trim($_POST['address'] ?? '');
 
         try {
-            $stmt = $pdo->prepare("UPDATE users SET full_name = :full_name, phone = :phone, address = :address WHERE id = :id");
-            $stmt->execute([
+            $fs->updateDocument('users', (string)$user['id'], [
                 'full_name' => $full_name,
                 'phone' => $phone,
                 'address' => $address,
-                'id' => $user['id']
             ]);
 
-            // Update session cache
             $_SESSION['user']['full_name'] = $full_name;
             $success_msg = 'บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว';
-        } catch (PDOException $e) {
+        } catch (Exception $e) {
             error_log('[PROFILE UPDATE ERROR] ' . $e->getMessage());
             $errors[] = 'เกิดข้อผิดพลาดในการบันทึกข้อมูลส่วนตัว';
         }
@@ -64,15 +60,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($new_password !== $confirm_password) {
             $errors[] = 'ยืนยันรหัสผ่านใหม่ไม่ตรงกัน';
         } else {
-            // Verify current password
-            $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = :id LIMIT 1");
-            $stmt->execute(['id' => $user['id']]);
-            $u_data = $stmt->fetch();
-
-            if ($u_data && password_verify($current_password, $u_data['password_hash'])) {
+            $u_data = $fs->getDocument('users', (string)$user['id']);
+            if ($u_data && !empty($u_data['password_hash']) && password_verify($current_password, $u_data['password_hash'])) {
                 $new_hash = password_hash($new_password, PASSWORD_BCRYPT);
-                $up_stmt = $pdo->prepare("UPDATE users SET password_hash = :hash WHERE id = :id");
-                $up_stmt->execute(['hash' => $new_hash, 'id' => $user['id']]);
+                $fs->updateDocument('users', (string)$user['id'], [
+                    'password_hash' => $new_hash,
+                ]);
                 $success_msg = 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว';
             } else {
                 $errors[] = 'รหัสผ่านปัจจุบันไม่ถูกต้อง';
@@ -81,17 +74,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Fetch latest user details from DB
-$u_stmt = $pdo->prepare("SELECT * FROM users WHERE id = :id LIMIT 1");
-$u_stmt->execute(['id' => $user['id']]);
-$profile = $u_stmt->fetch() ?: $user;
+// Fetch latest profile from Firestore
+$profile = $fs->getDocument('users', (string)$user['id']) ?: $user;
 
-// Order statistics
-$order_stat_stmt = $pdo->prepare("SELECT COUNT(*) AS total_orders, 
-                                          SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) AS pending_orders
-                                   FROM orders WHERE user_id = :id");
-$order_stat_stmt->execute(['id' => $user['id']]);
-$user_order_stats = $order_stat_stmt->fetch();
+// Order statistics from Firestore orders
+$all_orders = $fs->listDocuments('orders');
+$total_orders = 0;
+foreach ($all_orders as $ord) {
+    if ((string)($ord['user_id'] ?? '') === (string)$user['id']) {
+        $total_orders++;
+    }
+}
 
 $page_title = 'บัญชีและโปรไฟล์ของฉัน - Amulet Siam';
 require_once __DIR__ . '/includes/header.php';
@@ -122,18 +115,18 @@ require_once __DIR__ . '/includes/header.php';
         <div class="card" style="padding: 1.25rem;">
             <div style="font-size: 0.85rem; color: var(--text-light); opacity: 0.8;">ผู้ใช้งานระบบ</div>
             <div style="font-size: 1.2rem; font-weight: 700; color: var(--gold-accent);">
-                <?= htmlspecialchars($profile['username'], ENT_QUOTES, 'UTF-8') ?>
-                <?php if ($profile['role'] === 'admin'): ?>
+                <?= htmlspecialchars($profile['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+                <?php if (($profile['role'] ?? '') === 'admin'): ?>
                     <span class="badge" style="background: var(--gold-accent); color: #380108; margin-left: 0.5rem;">ผู้ดูแลระบบ (Admin)</span>
                 <?php endif; ?>
             </div>
-            <div style="font-size: 0.85rem; color: var(--text-light);"><?= htmlspecialchars($profile['email'], ENT_QUOTES, 'UTF-8') ?></div>
+            <div style="font-size: 0.85rem; color: var(--text-light);"><?= htmlspecialchars($profile['email'] ?? '', ENT_QUOTES, 'UTF-8') ?></div>
         </div>
 
         <div class="card" style="padding: 1.25rem;">
             <div style="font-size: 0.85rem; color: var(--text-light); opacity: 0.8;">คำสั่งเช่าบูชาทั้งหมด</div>
             <div style="font-size: 1.6rem; font-weight: 700; color: var(--gold-accent);">
-                <?= (int)($user_order_stats['total_orders'] ?? 0) ?> รายการ
+                <?= $total_orders ?> รายการ
             </div>
             <a href="my_orders.php" style="font-size: 0.85rem; text-decoration: underline;">ดูประวัติคำสั่งซื้อ &rarr;</a>
         </div>
@@ -150,12 +143,12 @@ require_once __DIR__ . '/includes/header.php';
 
                 <div class="form-group">
                     <label class="form-label" for="username">ชื่อบัญชีผู้ใช้ (Username)</label>
-                    <input type="text" id="username" class="form-control" value="<?= htmlspecialchars($profile['username'], ENT_QUOTES, 'UTF-8') ?>" disabled style="opacity: 0.7;">
+                    <input type="text" id="username" class="form-control" value="<?= htmlspecialchars($profile['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>" disabled style="opacity: 0.7;">
                 </div>
 
                 <div class="form-group">
                     <label class="form-label" for="email">อีเมล (Email)</label>
-                    <input type="email" id="email" class="form-control" value="<?= htmlspecialchars($profile['email'], ENT_QUOTES, 'UTF-8') ?>" disabled style="opacity: 0.7;">
+                    <input type="email" id="email" class="form-control" value="<?= htmlspecialchars($profile['email'] ?? '', ENT_QUOTES, 'UTF-8') ?>" disabled style="opacity: 0.7;">
                 </div>
 
                 <div class="form-group">
@@ -211,4 +204,3 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
-

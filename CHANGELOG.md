@@ -7,6 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added - 2026-11-05
+- **100% Pure Cloud Firestore Cutover Completed**:
+  - Eliminated all hard dependencies on MySQL/phpMyAdmin across all 21 application endpoints.
+  - Re-architected all modules to read/write natively to Google Cloud Firestore (`amuletsiam`):
+    - **Authentication**: `register.php`, `login.php`, `profile.php` directly query and persist users in Firestore with bcrypt hashing.
+    - **E-Commerce & Orders**: `index.php`, `amulet.php`, `cart.php`, `checkout.php`, `my_orders.php` operate 100% on Firestore collections (`amulets`, `categories`, `orders`).
+    - **Real-Time Auctions & Bidding**: `auctions.php`, `auction_room.php`, `api/place_bid.php`, `api/auction_status.php` read and persist live bids, room status, and +3 min anti-snipe logic directly in Firestore.
+    - **Admin CMS**: `admin/index.php`, `admin/amulets.php`, `admin/amulet_form.php`, `admin/amulet_delete.php`, `admin/categories.php`, `admin/category_delete.php`, `admin/orders.php`, `admin/auctions.php` fully powered by Firestore REST client.
+  - Added safe fallback in `includes/db_connect.php` to prevent fatal PDO errors when MySQL is not available (Cloud container environment).
+  - Created and executed comprehensive automated test suite `test_pure_firestore.php` verifying zero MySQL dependency and 100% Firestore operations.
+- Prepared production deployment package for **Render (Free Cloud PHP Hosting)**:
+  - `Dockerfile`: Production PHP 8.2 Apache container with `gd`, `pdo`, `curl`, and rewrite modules.
+  - `render.yaml`: Blueprint configuration for one-click deployment on Render.
+  - `.dockerignore` & `.gitignore`: Clean deployment artifacts.
+  - Initialized Git repository and created baseline deployment commit.
 - Successfully migrated all data from MySQL to live **Google Cloud Firebase Firestore**:
   - `categories`: 5 categories imported.
   - `users`: 5 accounts migrated with bcrypt hashes.
