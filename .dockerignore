@@ -1,0 +1,4 @@
+.git
+.DS_Store
+*.log
+test_dummy.txt

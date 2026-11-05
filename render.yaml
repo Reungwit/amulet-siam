@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: amuletsiam-app
+    env: docker
+    plan: free
+    region: singapore
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: FIREBASE_PROJECT_ID
+        value: amuletsiam
+      - key: FIREBASE_API_KEY
+        value: AIzaSyDtNfbfvspe5LeQHBi8Vtl8sjEC4Aitq9g

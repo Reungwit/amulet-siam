@@ -1,0 +1,69 @@
+# Project Information: Thai Amulet Marketplace & Real-Time Auction
+
+## Project Overview
+A web platform for Thai amulet direct sales and real-time auctions with custom styling, HTML5 canvas radar charts for spiritual status attributes, order verification, and real-time Anti-Snipe bidding backed by Firebase Firestore.
+
+## Tech Stack
+- Frontend: HTML5, Custom CSS3, Vanilla JavaScript (Fetch API & HTML5 Canvas), Firebase Client SDK (Real-Time listener)
+- Backend: PHP 8+ (Native REST Client, Sessions)
+- Database: Firebase Firestore (NoSQL) & MySQL (Legacy / Migration Source)
+- Timezone: Asia/Bangkok (+07:00 Thailand)
+- Communication: HTTP POST throughout the platform
+- Color Palette:
+  - Primary Dark Red: #5e030f
+  - Primary Gold Accent: #E9D793
+  - Dark Card Background: #45020b
+  - Light Text: #ffffff
+  - Dark Text: #333333
+
+## File Structure (Updated: 2026-11-05)
+```
+/myapp
+├── AGENTS.md                  # Project rules & guidelines
+├── CHANGELOG.md               # Version history and tracking
+├── TODOS.md                   # Implementation task tracker
+├── project_info.txt           # Project structure and metadata
+├── schema.sql                 # MySQL schema definitions (Legacy)
+├── test_suite.php             # Automated test suite (100% passed)
+├── migrate_mysql_to_firestore.php # Migration tool from MySQL to Firestore
+├── index.php                  # Catalog with POST search & filters
+├── amulet.php                 # Detail view with HTML5 Canvas Radar chart
+├── auctions.php               # Live auction listings with JS countdown
+├── auction_room.php           # Interactive live auction bidding room
+├── profile.php                # User profile & account management
+├── cart.php                   # Shopping cart management
+├── checkout.php               # Checkout & slip upload handler
+├── my_orders.php              # Customer order history & tracking
+├── register.php               # User registration form
+├── login.php                  # Authentication handler & session initiation
+├── logout.php                 # Session termination
+├── seed.php                   # Database seeder (admin & categories)
+├── api/
+│   ├── place_bid.php          # AJAX POST bidding & Anti-Snipe extension
+│   └── auction_status.php     # Live auction polling & bid history via POST
+├── css/
+│   └── style.css              # Custom CSS variables, responsive grid, gold theme
+├── js/
+│   ├── main.js                # Core JS helpers, flash messages, formatters
+│   ├── auction.js             # Real-time countdown & live bidding AJAX
+│   └── radar.js               # HTML5 Canvas 6-point Hexagon Radar Chart engine
+├── images/
+│   ├── uploads/               # User slips & amulet photo uploads
+│   └── assets/                # Logos & decorative banners
+├── includes/
+│   ├── admin_guard.php        # Admin role enforcement
+│   ├── db_connect.php         # PDO database connection & query wrappers
+│   ├── firebase_config.php    # Firebase Project ID & API Key settings
+│   ├── firestore_client.php   # Native PHP Firestore REST Client
+│   ├── header.php             # Semantic header & navigation bar
+│   └── footer.php             # Global footer
+└── admin/
+    ├── index.php              # Admin dashboard overview
+    ├── amulets.php            # Amulet list management
+    ├── amulet_form.php        # Add/Edit amulet with 6-stat inputs & image upload
+    ├── amulet_delete.php      # Amulet deletion handler
+    ├── categories.php         # Category CRUD management
+    ├── category_delete.php    # Category deletion handler
+    ├── orders.php             # Order & slip verification management
+    └── auctions.php           # Admin auction management & scheduling
+```

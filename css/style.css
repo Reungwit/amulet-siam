@@ -1,0 +1,452 @@
+/* ==========================================================================
+   Thai Amulet Marketplace & Auction - Custom Stylesheet
+   Theme: Luxury Dark Crimson & Sacred Gold
+   ========================================================================== */
+
+:root {
+  --bg-dark: #5e030f;
+  --gold-accent: #E9D793;
+  --text-light: #ffffff;
+  --text-dark: #333333;
+  
+  /* Additional harmonic theme tokens */
+  --bg-card: #45020b;
+  --bg-card-hover: #50030d;
+  --gold-hover: #f5e7b5;
+  --gold-dim: #b89f58;
+  --border-gold: rgba(233, 215, 147, 0.35);
+  --border-gold-strong: rgba(233, 215, 147, 0.8);
+  --shadow-gold: 0 4px 15px rgba(233, 215, 147, 0.2);
+  --shadow-dark: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --success: #2a9d8f;
+  --danger: #e63946;
+  --font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Sarabun", sans-serif;
+  --transition: all 0.25s ease-in-out;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--gold-accent);
+  font-family: var(--font-base);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: var(--gold-accent);
+  text-decoration: none;
+  transition: var(--transition);
+}
+
+a:hover {
+  color: var(--gold-hover);
+  text-shadow: 0 0 8px rgba(233, 215, 147, 0.5);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* ==========================================================================
+   Typography & Utility Classes
+   ========================================================================== */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--gold-accent);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-bottom: 0.75rem;
+}
+
+.text-light { color: var(--text-light); }
+.text-gold { color: var(--gold-accent); }
+.text-danger { color: var(--danger); }
+.text-success { color: var(--success); }
+.text-center { text-align: center; }
+
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.site-main {
+  flex: 1 0 auto;
+  padding: 2.5rem 0;
+}
+
+/* ==========================================================================
+   Header & Navigation
+   ========================================================================== */
+.site-header {
+  background: linear-gradient(180deg, #380108 0%, var(--bg-dark) 100%);
+  border-bottom: 2px solid var(--border-gold);
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  box-shadow: var(--shadow-dark);
+}
+
+.nav-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--gold-accent);
+}
+
+.brand-icon {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--gold-accent);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+.main-nav ul {
+  display: flex;
+  list-style: none;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.nav-link {
+  font-weight: 500;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  background: rgba(233, 215, 147, 0.12);
+  border: 1px solid var(--border-gold);
+}
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+.btn {
+  display: inline-block;
+  padding: 0.65rem 1.4rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+
+.btn-gold {
+  background-color: var(--gold-accent);
+  color: #380108;
+  border-color: var(--gold-accent);
+}
+
+.btn-gold:hover {
+  background-color: var(--gold-hover);
+  color: #240004;
+  box-shadow: var(--shadow-gold);
+}
+
+.btn-outline-gold {
+  background: transparent;
+  color: var(--gold-accent);
+  border-color: var(--gold-accent);
+}
+
+.btn-outline-gold:hover {
+  background: rgba(233, 215, 147, 0.15);
+  color: var(--gold-hover);
+  border-color: var(--gold-hover);
+}
+
+/* ==========================================================================
+   Cards & Grid Layouts
+   ========================================================================== */
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.75rem;
+  margin-top: 1.5rem;
+}
+
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--shadow-dark);
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  border-color: var(--gold-accent);
+  box-shadow: var(--shadow-gold);
+}
+
+.card-img-wrap {
+  width: 100%;
+  height: 220px;
+  background-color: #2a0106;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-img-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card-body {
+  padding: 1.25rem;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-title {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.card-meta {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  opacity: 0.85;
+  margin-bottom: 0.85rem;
+}
+
+.card-price {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--gold-accent);
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+/* ==========================================================================
+   Filter & Search Bar
+   ========================================================================== */
+.filter-bar {
+  background: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow-dark);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr auto;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+@media (max-width: 768px) {
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   Detail Page Layout & Status Attributes
+   ========================================================================== */
+.detail-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .detail-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.amulet-gallery {
+  background: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  box-shadow: var(--shadow-dark);
+}
+
+.amulet-gallery img {
+  max-height: 420px;
+  width: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  margin: 0 auto;
+}
+
+.provenance-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+}
+
+.provenance-table th,
+.provenance-table td {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(233, 215, 147, 0.2);
+  text-align: left;
+}
+
+.provenance-table th {
+  color: var(--text-light);
+  font-weight: 500;
+  width: 35%;
+}
+
+.provenance-table td {
+  color: var(--gold-accent);
+  font-weight: 600;
+}
+
+.stats-grid-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.stat-pill {
+  background: #350107;
+  border: 1px solid var(--border-gold);
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-pill-label {
+  font-size: 0.85rem;
+  color: var(--text-light);
+}
+
+.stat-pill-score {
+  font-weight: 700;
+  color: var(--gold-accent);
+}
+
+/* ==========================================================================
+   Badges
+   ========================================================================== */
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.badge-auction {
+  background: var(--danger);
+  color: var(--text-light);
+}
+
+.badge-fixed {
+  background: var(--success);
+  color: var(--text-light);
+}
+
+/* ==========================================================================
+   Forms & Controls
+   ========================================================================== */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  color: var(--gold-accent);
+}
+
+.form-control {
+  width: 100%;
+  padding: 0.65rem 0.9rem;
+  background: #360107;
+  border: 1px solid var(--border-gold);
+  border-radius: 5px;
+  color: var(--text-light);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--gold-accent);
+  box-shadow: 0 0 8px rgba(233, 215, 147, 0.4);
+}
+
+/* ==========================================================================
+   Radar Chart Canvas Container
+   ========================================================================== */
+.chart-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1.5rem;
+  background: radial-gradient(circle, #50030d 0%, #300106 100%);
+  border: 1px solid var(--border-gold);
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  overflow: hidden;
+}
+
+canvas.status-radar {
+  max-width: 100%;
+  height: auto;
+  background-color: transparent;
+}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+.site-footer {
+  background-color: #2e0106;
+  border-top: 1px solid var(--border-gold);
+  padding: 2rem 0;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+
+.site-footer a {
+  color: var(--gold-accent);
+}
